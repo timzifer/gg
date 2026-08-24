@@ -558,11 +558,11 @@ func BenchmarkMeasureText(b *testing.B) {
 
 // BenchmarkClassifyRune benchmarks rune classification.
 func BenchmarkClassifyRune(b *testing.B) {
-	runes := []rune("The quick brown fox jumps over the lazy dog.")
+	const text = "The quick brown fox jumps over the lazy dog."
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		for _, r := range runes {
+		for _, r := range text {
 			_ = classifyRune(r)
 		}
 	}
