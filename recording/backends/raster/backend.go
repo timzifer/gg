@@ -65,6 +65,7 @@ type Backend struct {
 	ctx    *gg.Context
 	width  int
 	height int
+	scale  float64
 }
 
 // Ensure Backend implements all required interfaces.
@@ -75,18 +76,34 @@ var (
 	_ recording.PixmapBackend = (*Backend)(nil)
 )
 
-// NewBackend creates a new raster backend.
+// NewBackend creates a new raster backend at 1x scale.
 // The backend must be initialized with Begin before use.
 func NewBackend() *Backend {
-	return &Backend{}
+	return &Backend{scale: 1}
+}
+
+// NewBackendWithScale creates a raster backend that renders at the given scale.
+// Scale 2 produces a 2x pixel image (HiDPI/Retina quality).
+// The recording's world-space coordinates are scaled uniformly at playback time,
+// matching Cairo's replay_with_transform and Skia's fInitialCTM composition.
+func NewBackendWithScale(scale float64) *Backend {
+	if scale <= 0 {
+		scale = 1
+	}
+	return &Backend{scale: scale}
 }
 
 // Begin initializes the backend for rendering at the given dimensions.
-// This must be called before any drawing operations.
+// When scale > 1, the pixel buffer is enlarged and a uniform scale transform
+// is applied so world-space coordinates map correctly to physical pixels.
 func (b *Backend) Begin(width, height int) error {
 	b.width = width
 	b.height = height
-	b.ctx = gg.NewContext(width, height)
+	s := b.scale
+	b.ctx = gg.NewContext(int(float64(width)*s), int(float64(height)*s))
+	if s != 1 {
+		b.ctx.Scale(s, s)
+	}
 	return nil
 }
 
@@ -216,15 +233,16 @@ func (b *Backend) DrawImage(img image.Image, src, dst recording.Rect, _ recordin
 }
 
 // DrawText draws text at the given position with the specified font face and brush.
-// Note: Text rendering is not fully implemented in this backend.
-// gg.Context doesn't have SetFontFace with text.Face interface.
-// A full implementation would need font handling integration.
-func (b *Backend) DrawText(_ string, _, _ float64, _ text.Face, brush recording.Brush) {
-	// Apply brush for text color
+// The face carries the font set at recording time; Go GC keeps it alive while the
+// recording holds a reference (analogous to Skia sk_sp<SkTextBlob> / Cairo
+// cairo_scaled_font_reference pattern).
+func (b *Backend) DrawText(s string, x, y float64, face text.Face, brush recording.Brush) {
+	if face == nil || s == "" {
+		return
+	}
 	b.applyBrush(brush, true)
-
-	// TODO: Implement text rendering when gg.Context supports text.Face
-	// For now, we only apply the brush but don't render text
+	b.ctx.SetFont(face)
+	b.ctx.DrawString(s, x, y)
 }
 
 // WriteTo writes the rendered content as PNG to the given writer.

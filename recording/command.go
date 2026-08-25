@@ -32,6 +32,8 @@
 //	r.Playback(pdfBackend)
 package recording
 
+import "github.com/gogpu/gg/text"
+
 // CommandType identifies the type of a command.
 // Each command type corresponds to a specific drawing operation.
 type CommandType uint8
@@ -279,10 +281,13 @@ type DrawTextCommand struct {
 	X float64
 	// Y is the vertical position (baseline).
 	Y float64
-	// FontSize is the size of the font in points.
+	// FontSize is the size of the font in points (scaled by CTM at record time).
 	FontSize float64
 	// FontFamily is the name of the font family.
 	FontFamily string
+	// Face is the font face set at recording time. Go GC keeps it alive
+	// while the recording holds this reference (Skia sk_sp / Cairo ref-count pattern).
+	Face text.Face
 	// Brush references the text color/brush in the resource pool.
 	Brush BrushRef
 }
@@ -299,10 +304,12 @@ type StrokeTextCommand struct {
 	X float64
 	// Y is the vertical position (baseline).
 	Y float64
-	// FontSize is the size of the font in points.
+	// FontSize is the size of the font in points (scaled by CTM at record time).
 	FontSize float64
 	// FontFamily is the name of the font family.
 	FontFamily string
+	// Face is the font face set at recording time.
+	Face text.Face
 	// Brush references the stroke color/brush in the resource pool.
 	Brush BrushRef
 	// Stroke contains the stroke style (width, cap, join, dash).

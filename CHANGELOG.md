@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Recording raster backend: DrawText now renders text** — `DrawText` was a
+  no-op because the font face was not stored in commands. Now `DrawTextCommand`
+  carries `text.Face` (Go GC keeps font alive, matching Skia `sk_sp<SkTextBlob>`
+  / Cairo `cairo_scaled_font_reference` pattern). Font size is scaled by the CTM
+  at record time so playback in identity space renders at the correct size.
+
+- **Recording raster backend: HiDPI scale support** — `NewBackendWithScale(scale)`
+  creates an enlarged pixel buffer with uniform scale transform at playback time
+  (matching Skia `fInitialCTM` composition / Cairo `replay_with_transform`).
+
 - **Text-outline glyph cache collision between font faces** ([#514](https://github.com/gogpu/gg/pull/514), @kivutar) —
   Font IDs now include the full face name, preventing regular and bold faces
   in the same family from sharing cached outlines. Font ID computation unified

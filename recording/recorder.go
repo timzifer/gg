@@ -193,14 +193,10 @@ func (r *Recording) Playback(backend Backend) error {
 			backend.DrawImage(img, c.SrcRect, c.DstRect, c.Options)
 		case DrawTextCommand:
 			brush := r.resources.GetBrush(c.Brush)
-			// Font face lookup would need additional handling
-			backend.DrawText(c.Text, c.X, c.Y, nil, brush)
+			backend.DrawText(c.Text, c.X, c.Y, c.Face, brush)
 		case StrokeTextCommand:
 			brush := r.resources.GetBrush(c.Brush)
-			// StrokeText is recorded as a stroke text command.
-			// Backends that support text stroking can use the stroke style;
-			// others fall back to DrawText (fill) as an approximation.
-			backend.DrawText(c.Text, c.X, c.Y, nil, brush)
+			backend.DrawText(c.Text, c.X, c.Y, c.Face, brush)
 		// Style commands are handled by the backend's internal state
 		// during the actual drawing operations
 		case SetFillStyleCommand, SetStrokeStyleCommand,
@@ -1137,19 +1133,27 @@ func (r *Recorder) SetFontFamily(family string) {
 	r.fontFamily = family
 }
 
-// DrawString draws text at position (x, y) where y is the baseline.
-func (r *Recorder) DrawString(s string, x, y float64) {
-	// Transform position
-	px, py := r.transform.TransformPoint(x, y)
+// transformScale returns the uniform scale factor from the current CTM.
+// Used to scale font size into world space (matching pre-transformed positions).
+func (r *Recorder) transformScale() float64 {
+	return math.Sqrt(r.transform.A*r.transform.A + r.transform.B*r.transform.B)
+}
 
+// DrawString draws text at position (x, y) where y is the baseline.
+// Position is transformed to world space. Font size is scaled by the CTM's
+// scale factor so that playback in identity space renders at the correct size
+// (matching how positions are pre-transformed).
+func (r *Recorder) DrawString(s string, x, y float64) {
+	px, py := r.transform.TransformPoint(x, y)
 	brushRef := r.resources.AddBrush(r.fillBrush)
 
 	r.commands = append(r.commands, DrawTextCommand{
 		Text:       s,
 		X:          px,
 		Y:          py,
-		FontSize:   r.fontSize,
+		FontSize:   r.fontSize * r.transformScale(),
 		FontFamily: r.fontFamily,
+		Face:       r.fontFace,
 		Brush:      brushRef,
 	})
 }
@@ -1182,8 +1186,9 @@ func (r *Recorder) StrokeString(s string, x, y float64) {
 		Text:       s,
 		X:          px,
 		Y:          py,
-		FontSize:   r.fontSize,
+		FontSize:   r.fontSize * r.transformScale(),
 		FontFamily: r.fontFamily,
+		Face:       r.fontFace,
 		Brush:      brushRef,
 		Stroke:     stroke,
 	})

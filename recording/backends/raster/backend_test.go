@@ -8,6 +8,8 @@ import (
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/recording"
+	"github.com/gogpu/gg/text"
+	"golang.org/x/image/font/gofont/goregular"
 )
 
 func TestBackendRegistration(t *testing.T) {
@@ -573,4 +575,186 @@ func TestBackendDashedStroke(t *testing.T) {
 	if pixel.A == 0 {
 		t.Error("expected non-transparent pixel on dashed line")
 	}
+}
+
+func loadGoRegular(t *testing.T) text.Face {
+	t.Helper()
+	src, err := text.NewFontSource(goregular.TTF)
+	if err != nil {
+		t.Fatalf("NewFontSource: %v", err)
+	}
+	t.Cleanup(func() { _ = src.Close() })
+	return src.Face(24)
+}
+
+func TestDrawTextRendersInkPixels(t *testing.T) {
+	face := loadGoRegular(t)
+
+	rec := recording.NewRecorder(200, 60)
+	rec.SetFont(face)
+	rec.SetFontSize(24)
+	rec.SetFillRGBA(0, 0, 0, 1)
+	rec.DrawString("Hello", 10, 40)
+	r := rec.FinishRecording()
+
+	backend := NewBackend()
+	if err := r.Playback(backend); err != nil {
+		t.Fatalf("Playback: %v", err)
+	}
+
+	img := backend.Image()
+	rgba := toRGBA(img)
+	ink := countNonWhitePixels(rgba)
+	if ink == 0 {
+		t.Fatal("DrawText produced no ink pixels — text not rendered")
+	}
+	t.Logf("ink pixels: %d", ink)
+}
+
+func TestDrawTextWithNilFaceIsNoOp(t *testing.T) {
+	rec := recording.NewRecorder(100, 40)
+	rec.SetFillRGBA(0, 0, 0, 1)
+	rec.DrawString("Ghost", 10, 30)
+	r := rec.FinishRecording()
+
+	backend := NewBackend()
+	if err := r.Playback(backend); err != nil {
+		t.Fatalf("Playback: %v", err)
+	}
+
+	img := backend.Image()
+	rgba := toRGBA(img)
+	ink := countNonWhitePixels(rgba)
+	if ink != 0 {
+		t.Errorf("nil face should produce no ink, got %d pixels", ink)
+	}
+}
+
+func TestDrawTextScaledFontSize(t *testing.T) {
+	face := loadGoRegular(t)
+
+	render := func(scale float64) int {
+		rec := recording.NewRecorder(200, 100)
+		rec.SetFont(face)
+		rec.SetFontSize(16)
+		if scale != 1 {
+			rec.Scale(scale, scale)
+		}
+		rec.SetFillRGBA(0, 0, 0, 1)
+		rec.DrawString("Ag", 5, 20)
+		r := rec.FinishRecording()
+
+		backend := NewBackend()
+		if err := r.Playback(backend); err != nil {
+			t.Fatalf("Playback(scale=%.1f): %v", scale, err)
+		}
+		return countNonWhitePixels(toRGBA(backend.Image()))
+	}
+
+	ink1x := render(1)
+	ink2x := render(2)
+
+	if ink1x == 0 {
+		t.Fatal("1x produced no ink")
+	}
+	if ink2x <= ink1x {
+		t.Errorf("2x scale (%d ink) should produce more ink than 1x (%d)", ink2x, ink1x)
+	}
+	t.Logf("1x=%d 2x=%d ratio=%.1f", ink1x, ink2x, float64(ink2x)/float64(ink1x))
+}
+
+func TestNewBackendWithScale(t *testing.T) {
+	rec := recording.NewRecorder(100, 50)
+	rec.SetFillRGBA(1, 0, 0, 1)
+	rec.DrawRectangle(10, 10, 80, 30)
+	rec.Fill()
+	r := rec.FinishRecording()
+
+	backend := NewBackendWithScale(2)
+	if err := r.Playback(backend); err != nil {
+		t.Fatalf("Playback: %v", err)
+	}
+
+	img := backend.Image()
+	bounds := img.Bounds()
+	if bounds.Dx() != 200 || bounds.Dy() != 100 {
+		t.Errorf("2x backend image = %dx%d, want 200x100", bounds.Dx(), bounds.Dy())
+	}
+
+	rgba := toRGBA(img)
+	red := countRedPixels(rgba)
+	if red == 0 {
+		t.Fatal("no red pixels — rectangle not rendered at 2x scale")
+	}
+	t.Logf("2x image: %dx%d, red pixels: %d", bounds.Dx(), bounds.Dy(), red)
+}
+
+func TestNewBackendWithScaleText(t *testing.T) {
+	face := loadGoRegular(t)
+
+	render := func(scale float64) int {
+		rec := recording.NewRecorder(200, 60)
+		rec.SetFont(face)
+		rec.SetFontSize(20)
+		rec.SetFillRGBA(0, 0, 0, 1)
+		rec.DrawString("Test", 10, 40)
+		r := rec.FinishRecording()
+
+		backend := NewBackendWithScale(scale)
+		if err := r.Playback(backend); err != nil {
+			t.Fatalf("Playback(scale=%.1f): %v", scale, err)
+		}
+		return countNonWhitePixels(toRGBA(backend.Image()))
+	}
+
+	ink1x := render(1)
+	ink2x := render(2)
+	if ink1x == 0 {
+		t.Fatal("1x text produced no ink")
+	}
+	if ink2x < ink1x*2 {
+		t.Errorf("2x backend text (%d ink) should have roughly 4x more pixels than 1x (%d)", ink2x, ink1x)
+	}
+}
+
+func toRGBA(img image.Image) *image.RGBA {
+	if rgba, ok := img.(*image.RGBA); ok {
+		return rgba
+	}
+	bounds := img.Bounds()
+	rgba := image.NewRGBA(bounds)
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			rgba.Set(x, y, img.At(x, y))
+		}
+	}
+	return rgba
+}
+
+func countNonWhitePixels(img *image.RGBA) int {
+	count := 0
+	bounds := img.Bounds()
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			c := img.RGBAAt(x, y)
+			if c.A > 0 && (c.R < 250 || c.G < 250 || c.B < 250) {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+func countRedPixels(img *image.RGBA) int {
+	count := 0
+	bounds := img.Bounds()
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			c := img.RGBAAt(x, y)
+			if c.R > 200 && c.G < 50 && c.B < 50 && c.A > 200 {
+				count++
+			}
+		}
+	}
+	return count
 }
