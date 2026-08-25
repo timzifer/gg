@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.52.4] - 2026-08-25
+
 ### Fixed
 
 - **Recording raster backend: DrawText now renders text** — `DrawText` was a
@@ -31,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Removed ~1,740 LOC of orphaned code (`gpucore/` package + `HALAdapter`).
   Planned as GPU abstraction for Vello compute but never adopted — production
   uses `*wgpu.Device`/`*wgpu.Queue` directly (Vello pattern).
+
+### Changed
+
+- deps: wgpu v0.31.4 → v0.31.6
 
 ## [0.52.3] - 2026-08-13
 
