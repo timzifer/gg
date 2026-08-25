@@ -717,6 +717,119 @@ func TestNewBackendWithScaleText(t *testing.T) {
 	}
 }
 
+// TestNewBackendWithScaleFillRect is the regression test for BUG-RASTER-BACKEND-SCALE-001:
+// FillRect called ctx.Identity() which reset Scale(2,2) → rectangle rendered in
+// top-left quadrant only (25% coverage instead of 100%).
+func TestNewBackendWithScaleFillRect(t *testing.T) {
+	rec := recording.NewRecorder(100, 50)
+	rec.SetFillRGBA(1, 0, 0, 1)
+	rec.FillRectangle(0, 0, 100, 50)
+	r := rec.FinishRecording()
+
+	backend := NewBackendWithScale(2)
+	if err := r.Playback(backend); err != nil {
+		t.Fatalf("Playback: %v", err)
+	}
+
+	img := backend.Image()
+	bounds := img.Bounds()
+	if bounds.Dx() != 200 || bounds.Dy() != 100 {
+		t.Fatalf("2x image = %dx%d, want 200x100", bounds.Dx(), bounds.Dy())
+	}
+
+	rgba := toRGBA(img)
+	total := bounds.Dx() * bounds.Dy()
+	red := countRedPixels(rgba)
+	coverage := float64(red) / float64(total) * 100
+	if coverage < 99 {
+		t.Fatalf("FillRect at 2x scale: %.1f%% coverage (want 100%%) — device scale lost", coverage)
+	}
+
+	// Verify bottom-right corner is filled (pre-fix: transparent)
+	c := rgba.RGBAAt(199, 99)
+	if c.A == 0 {
+		t.Fatal("bottom-right pixel transparent — device scale not applied to FillRect")
+	}
+}
+
+func TestNewBackendWithScaleFillPath(t *testing.T) {
+	rec := recording.NewRecorder(100, 50)
+	rec.SetFillRGBA(0, 0, 1, 1)
+	rec.DrawRectangle(0, 0, 100, 50)
+	rec.Fill()
+	r := rec.FinishRecording()
+
+	backend := NewBackendWithScale(2)
+	if err := r.Playback(backend); err != nil {
+		t.Fatalf("Playback: %v", err)
+	}
+
+	rgba := toRGBA(backend.Image())
+	bounds := backend.Image().Bounds()
+	total := bounds.Dx() * bounds.Dy()
+	filled := 0
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			c := rgba.RGBAAt(x, y)
+			if c.B > 200 && c.A > 200 {
+				filled++
+			}
+		}
+	}
+	coverage := float64(filled) / float64(total) * 100
+	if coverage < 95 {
+		t.Fatalf("FillPath at 2x scale: %.1f%% coverage (want ~100%%)", coverage)
+	}
+}
+
+func TestNewBackendWithScaleClip(t *testing.T) {
+	rec := recording.NewRecorder(100, 100)
+	rec.DrawRectangle(10, 10, 80, 80)
+	rec.Clip()
+	rec.SetFillRGBA(1, 0, 0, 1)
+	rec.FillRectangle(0, 0, 100, 100)
+	r := rec.FinishRecording()
+
+	backend := NewBackendWithScale(2)
+	if err := r.Playback(backend); err != nil {
+		t.Fatalf("Playback: %v", err)
+	}
+
+	rgba := toRGBA(backend.Image())
+	// At 2x, clip region (10,10,80,80) → pixels (20,20)-(180,180)
+	// Inside clip should be red
+	c := rgba.RGBAAt(100, 100)
+	if c.R < 200 || c.A < 200 {
+		t.Fatalf("center pixel inside clip = R:%d A:%d, want red", c.R, c.A)
+	}
+	// Outside clip should be transparent
+	c = rgba.RGBAAt(5, 5)
+	if c.A > 0 {
+		t.Fatalf("pixel outside clip has A=%d, want 0", c.A)
+	}
+}
+
+func TestNewBackendWithScaleSetTransform(t *testing.T) {
+	rec := recording.NewRecorder(100, 100)
+	rec.Translate(50, 50)
+	rec.SetFillRGBA(1, 0, 0, 1)
+	rec.DrawRectangle(-10, -10, 20, 20)
+	rec.Fill()
+	r := rec.FinishRecording()
+
+	backend := NewBackendWithScale(2)
+	if err := r.Playback(backend); err != nil {
+		t.Fatalf("Playback: %v", err)
+	}
+
+	rgba := toRGBA(backend.Image())
+	// At 2x, center (50,50) → pixel (100,100), rect 20x20 → 40x40 pixels
+	c := rgba.RGBAAt(100, 100)
+	if c.R < 200 || c.A < 200 {
+		t.Fatalf("center pixel at 2x = R:%d A:%d, want red", c.R, c.A)
+	}
+}
+
 func toRGBA(img image.Image) *image.RGBA {
 	if rgba, ok := img.(*image.RGBA); ok {
 		return rgba

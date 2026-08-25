@@ -107,6 +107,18 @@ func (b *Backend) Begin(width, height int) error {
 	return nil
 }
 
+// applyDeviceScale resets the CTM to the device scale transform.
+// This is the raster backend's equivalent of Skia's fInitialCTM — a persistent
+// base transform that maps world-space coordinates to device pixels. All places
+// that previously called ctx.Identity() now call this instead, so the device
+// scale survives across draw operations.
+func (b *Backend) applyDeviceScale() {
+	b.ctx.Identity()
+	if b.scale != 1 {
+		b.ctx.Scale(b.scale, b.scale)
+	}
+}
+
 // End finalizes the rendering.
 // After End is called, output methods (WriteTo, SaveToFile) can be used.
 func (b *Backend) End() error {
@@ -124,9 +136,12 @@ func (b *Backend) Restore() {
 }
 
 // SetTransform sets the current transformation matrix.
+// Composes the recorded transform with the device scale (Skia fInitialCTM pattern:
+// canvas.setMatrix(fInitialCTM * r.matrix)). This ensures device scale is
+// preserved when the recording replays transform commands.
 func (b *Backend) SetTransform(m recording.Matrix) {
-	// Convert recording.Matrix to gg.Matrix
-	b.ctx.SetTransform(gg.Matrix{
+	b.applyDeviceScale()
+	b.ctx.Transform(gg.Matrix{
 		A: m.A, B: m.B, C: m.C,
 		D: m.D, E: m.E, F: m.F,
 	})
@@ -138,16 +153,14 @@ func (b *Backend) SetClip(path *gg.Path, rule recording.FillRule) {
 		return
 	}
 
-	// Recording paths are already transformed into world coordinates. Build the
-	// path with an identity user transform so a transform command from the
-	// recording does not transform it a second time.
+	// Recording paths are already in world coordinates. Apply device scale
+	// (not identity) so clip region maps correctly to device pixels.
 	transform := b.ctx.GetTransform()
-	b.ctx.Identity()
+	b.applyDeviceScale()
 	b.ctx.ClearPath()
 	b.setPathFromElements(path)
 	b.ctx.SetFillRule(convertFillRule(rule))
 	b.ctx.Clip()
-	// Keep the backend's current transform unchanged for subsequent commands.
 	b.ctx.SetTransform(transform)
 }
 
@@ -182,10 +195,10 @@ func (b *Backend) StrokePath(path *gg.Path, brush recording.Brush, stroke record
 
 // FillRect fills a rectangle with the brush.
 // The rect coordinates are in world space (already transformed during recording).
+// Device scale maps them to physical pixels.
 func (b *Backend) FillRect(rect recording.Rect, brush recording.Brush) {
 	b.applyBrush(brush, true)
-	// Reset transform since rect is already in world coordinates
-	b.ctx.Identity()
+	b.applyDeviceScale()
 	b.ctx.DrawRectangle(rect.MinX, rect.MinY, rect.Width(), rect.Height())
 	_ = b.ctx.Fill()
 }
@@ -285,22 +298,12 @@ func (b *Backend) Height() int {
 	return b.height
 }
 
-// setPath sets the path on the context with identity transform.
-// The path is assumed to be already in world coordinates.
+// setPath sets the path on the context with device scale transform.
+// The path is assumed to be already in world coordinates; device scale
+// maps them to physical pixels.
 func (b *Backend) setPath(path *gg.Path) {
-	// Save current transform
-	b.ctx.Push()
-	// Reset transform since path coordinates are already transformed
-	b.ctx.Identity()
-
 	b.ctx.ClearPath()
-	b.setPathFromElements(path)
-
-	// Restore transform for later operations
-	b.ctx.Pop()
-	// But we need to keep the path, so clear and rebuild with identity
-	b.ctx.ClearPath()
-	b.ctx.Identity()
+	b.applyDeviceScale()
 	b.setPathFromElements(path)
 }
 
