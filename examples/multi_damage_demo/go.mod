@@ -3,7 +3,7 @@ module multi_damage_demo
 go 1.25.5
 
 require (
-	github.com/gogpu/gg v0.52.4
+	github.com/gogpu/gg v0.52.5
 	github.com/gogpu/gogpu v0.53.0
 	github.com/gogpu/gpucontext v0.28.0
 )
