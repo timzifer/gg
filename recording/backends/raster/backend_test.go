@@ -717,6 +717,132 @@ func TestNewBackendWithScaleText(t *testing.T) {
 	}
 }
 
+// TestDrawStringAnchoredMatchesContext verifies that Recorder.DrawStringAnchored
+// computes the same anchor offset as Context.DrawStringAnchored. Pre-fix:
+// Recorder ignored ax/ay entirely, text drawn at raw (x,y) position.
+func TestDrawStringAnchoredMatchesContext(t *testing.T) {
+	face := loadGoRegular(t)
+	const (
+		w, h = 400, 100
+		s    = "Hello World"
+		x    = 350.0
+		y    = 50.0
+		ax   = 1.0 // right-aligned
+		ay   = 0.5 // vertically centered
+	)
+
+	// Direct Context rendering (reference)
+	dc := gg.NewContext(w, h)
+	dc.SetFont(face)
+	dc.SetRGB(0, 0, 0)
+	dc.DrawStringAnchored(s, x, y, ax, ay)
+	directImg := toRGBA(dc.Image())
+	directInk := countNonWhitePixels(directImg)
+
+	// Recording → raster backend rendering
+	rec := recording.NewRecorder(w, h)
+	rec.SetFont(face)
+	rec.SetFontSize(24)
+	rec.SetFillRGBA(0, 0, 0, 1)
+	rec.DrawStringAnchored(s, x, y, ax, ay)
+	r := rec.FinishRecording()
+
+	backend := NewBackend()
+	if err := r.Playback(backend); err != nil {
+		t.Fatalf("Playback: %v", err)
+	}
+	recImg := toRGBA(backend.Image())
+	recInk := countNonWhitePixels(recImg)
+
+	if directInk == 0 {
+		t.Fatal("direct Context produced no ink")
+	}
+	if recInk == 0 {
+		t.Fatal("recording produced no ink")
+	}
+
+	// Find ink bounds for both
+	directBounds := inkBounds(directImg)
+	recBounds := inkBounds(recImg)
+
+	// Right-aligned text at x=350 should end near x=350, not start there
+	if directBounds.maxX > 360 {
+		t.Errorf("direct: text extends past x=360 (maxX=%d) — anchor not applied", directBounds.maxX)
+	}
+	if abs(recBounds.minX-directBounds.minX) > 3 || abs(recBounds.maxX-directBounds.maxX) > 3 {
+		t.Errorf("recording anchor mismatch: direct X=[%d,%d], recording X=[%d,%d]",
+			directBounds.minX, directBounds.maxX, recBounds.minX, recBounds.maxX)
+	}
+	t.Logf("direct X=[%d,%d] ink=%d, recording X=[%d,%d] ink=%d",
+		directBounds.minX, directBounds.maxX, directInk, recBounds.minX, recBounds.maxX, recInk)
+}
+
+// TestDrawStringAnchoredZeroAnchorNoOffset verifies ax=0,ay=0 produces same
+// result as DrawString (no offset applied).
+func TestDrawStringAnchoredZeroAnchorNoOffset(t *testing.T) {
+	face := loadGoRegular(t)
+
+	render := func(useAnchored bool) *image.RGBA {
+		rec := recording.NewRecorder(200, 60)
+		rec.SetFont(face)
+		rec.SetFontSize(24)
+		rec.SetFillRGBA(0, 0, 0, 1)
+		if useAnchored {
+			rec.DrawStringAnchored("Test", 10, 40, 0, 0)
+		} else {
+			rec.DrawString("Test", 10, 40)
+		}
+		r := rec.FinishRecording()
+		backend := NewBackend()
+		_ = r.Playback(backend)
+		return toRGBA(backend.Image())
+	}
+
+	plain := render(false)
+	anchored := render(true)
+
+	plainB := inkBounds(plain)
+	anchoredB := inkBounds(anchored)
+
+	if plainB.count == 0 || anchoredB.count == 0 {
+		t.Fatalf("no ink: plain=%d anchored=%d", plainB.count, anchoredB.count)
+	}
+	if abs(plainB.minX-anchoredB.minX) > 1 || abs(plainB.maxX-anchoredB.maxX) > 1 {
+		t.Errorf("zero anchor changed position: plain X=[%d,%d], anchored X=[%d,%d]",
+			plainB.minX, plainB.maxX, anchoredB.minX, anchoredB.maxX)
+	}
+}
+
+type inkRect struct {
+	minX, minY, maxX, maxY, count int
+}
+
+func inkBounds(img *image.RGBA) inkRect {
+	bounds := img.Bounds()
+	r := inkRect{minX: bounds.Max.X, minY: bounds.Max.Y, maxX: -1, maxY: -1}
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			c := img.RGBAAt(x, y)
+			if c.A == 0 || (c.R >= 250 && c.G >= 250 && c.B >= 250) {
+				continue
+			}
+			r.count++
+			r.minX = min(r.minX, x)
+			r.minY = min(r.minY, y)
+			r.maxX = max(r.maxX, x)
+			r.maxY = max(r.maxY, y)
+		}
+	}
+	return r
+}
+
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
 // TestNewBackendWithScaleFillRect is the regression test for BUG-RASTER-BACKEND-SCALE-001:
 // FillRect called ctx.Identity() which reset Scale(2,2) → rectangle rendered in
 // top-left quadrant only (25% coverage instead of 100%).

@@ -1159,10 +1159,17 @@ func (r *Recorder) DrawString(s string, x, y float64) {
 }
 
 // DrawStringAnchored draws text with an anchor point.
-// The anchor point is specified by ax and ay, which are in the range [0, 1].
+// The anchor offset is computed at record time using text.Measure + face metrics,
+// matching Context.DrawStringAnchored exactly. The final baseline position is
+// stored in the command (Skia SkTextBlob pattern — pre-positioned glyphs).
 func (r *Recorder) DrawStringAnchored(s string, x, y, ax, ay float64) {
-	// For recording, we store the base position and let the backend handle anchoring
-	// This is a simplification; a full implementation would measure text
+	if r.fontFace != nil && (ax != 0 || ay != 0) {
+		w, _ := text.Measure(s, r.fontFace)
+		metrics := r.fontFace.Metrics()
+		h := metrics.Ascent + metrics.Descent
+		x -= w * ax
+		y = y + metrics.Ascent - ay*h
+	}
 	r.DrawString(s, x, y)
 }
 
@@ -1195,10 +1202,15 @@ func (r *Recorder) StrokeString(s string, x, y float64) {
 }
 
 // StrokeStringAnchored strokes text outlines with an anchor point.
-// The anchor point is specified by ax and ay, which are in the range [0, 1].
+// Anchor offset computed at record time, same as DrawStringAnchored.
 func (r *Recorder) StrokeStringAnchored(s string, x, y, ax, ay float64) {
-	// For recording, we store the base position and let the backend handle anchoring
-	// This is a simplification; a full implementation would measure text
+	if r.fontFace != nil && (ax != 0 || ay != 0) {
+		w, _ := text.Measure(s, r.fontFace)
+		metrics := r.fontFace.Metrics()
+		h := metrics.Ascent + metrics.Descent
+		x -= w * ax
+		y = y + metrics.Ascent - ay*h
+	}
 	r.StrokeString(s, x, y)
 }
 
