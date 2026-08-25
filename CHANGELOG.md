@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.52.5] - 2026-08-26
+
+### Fixed
+
+- **Raster backend device scale preserved across draw operations** — `FillRect`,
+  `setPath`, `SetClip`, and `SetTransform` called `ctx.Identity()` which reset the
+  device `Scale(2,2)` set in `Begin()`. At 2x scale, content rendered in the
+  top-left quadrant only (25% coverage). Fix: `applyDeviceScale()` replaces
+  `Identity()` (Skia `fInitialCTM` pattern). `SetTransform` now composes device
+  scale with recorded transform.
+
+- **Recording DrawStringAnchored anchor offset** — `Recorder.DrawStringAnchored`
+  and `StrokeStringAnchored` ignored `ax`/`ay` anchor parameters entirely. Text
+  was drawn at raw `(x,y)` without offset. Fix: compute anchor offset at record
+  time using `text.Measure` + face metrics, matching `Context.DrawStringAnchored`
+  exactly (Skia pre-positioned `SkTextBlob` pattern). Pixel-perfect parity verified.
+
 ## [0.52.4] - 2026-08-25
 
 ### Fixed
