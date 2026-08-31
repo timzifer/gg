@@ -176,5 +176,13 @@ func (NullDeviceHandle) AdapterInfo() gpucontext.AdapterInfo {
 	return gpucontext.AdapterInfo{Type: gpucontext.AdapterTypeUnknown}
 }
 
+// Features returns zero (no optional device features on the null device).
+func (NullDeviceHandle) Features() gputypes.Features { return 0 }
+
+// DownlevelCapabilities returns zero (CPU-only null device).
+func (NullDeviceHandle) DownlevelCapabilities() gputypes.DownlevelCapabilities {
+	return gputypes.DownlevelCapabilities{}
+}
+
 // Ensure NullDeviceHandle implements DeviceHandle.
 var _ DeviceHandle = NullDeviceHandle{}
