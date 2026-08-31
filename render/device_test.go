@@ -25,6 +25,12 @@ func TestNullDeviceHandle(t *testing.T) {
 	if handle.SurfaceFormat() != gputypes.TextureFormatUndefined {
 		t.Error("NullDeviceHandle.SurfaceFormat() should return Undefined")
 	}
+	if handle.Features() != 0 {
+		t.Errorf("Features() = %v, want 0", handle.Features())
+	}
+	if handle.DownlevelCapabilities() != (gputypes.DownlevelCapabilities{}) {
+		t.Errorf("DownlevelCapabilities() = %+v, want zero", handle.DownlevelCapabilities())
+	}
 }
 
 func TestTextureDescriptorDefault(t *testing.T) {
