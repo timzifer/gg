@@ -995,8 +995,9 @@ func (c *Canvas) uploadTexture(pixmap *gg.Pixmap, fullData []byte) error {
 		bounds := image.Rect(0, 0, pixmap.Width(), pixmap.Height())
 		dr = dr.Intersect(bounds)
 		if !dr.Empty() && dr != bounds {
-			regionData := c.extractRegion(fullData, pixmap.Width(), dr)
-			if err := regionUpdater.UpdateRegion(dr.Min.X, dr.Min.Y, dr.Dx(), dr.Dy(), regionData); err != nil {
+			const bytesPerPixel = 4
+			layout := gpucontext.ImageDataLayout{BytesPerRow: pixmap.Width() * bytesPerPixel}
+			if err := regionUpdater.UpdateRegion(dr, fullData, layout); err != nil {
 				return fmt.Errorf("ggcanvas: region update failed: %w", err)
 			}
 			return nil

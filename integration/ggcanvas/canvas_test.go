@@ -188,10 +188,17 @@ func (m *mockProvider) AdapterInfo() gpucontext.AdapterInfo {
 	return gpucontext.AdapterInfo{Type: gpucontext.AdapterTypeUnknown}
 }
 
+func (m *mockProvider) Features() gputypes.Features { return 0 }
+
+func (m *mockProvider) DownlevelCapabilities() gputypes.DownlevelCapabilities {
+	return gputypes.DownlevelCapabilities{}
+}
+
 // regionUpdate records the parameters of a single UpdateRegion call.
 type regionUpdate struct {
-	x, y, w, h int
-	data       []byte
+	region image.Rectangle
+	data   []byte
+	layout gpucontext.ImageDataLayout
 }
 
 // mockTexture implements the texture interfaces for testing.
@@ -215,10 +222,10 @@ func (m *mockTexture) UpdateData(data []byte) error {
 	return nil
 }
 
-func (m *mockTexture) UpdateRegion(x, y, w, h int, data []byte) error {
+func (m *mockTexture) UpdateRegion(region image.Rectangle, data []byte, layout gpucontext.ImageDataLayout) error {
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
-	m.regionUpdates = append(m.regionUpdates, regionUpdate{x: x, y: y, w: w, h: h, data: dataCopy})
+	m.regionUpdates = append(m.regionUpdates, regionUpdate{region: region, data: dataCopy, layout: layout})
 	return nil
 }
 
@@ -825,15 +832,18 @@ func TestFlushPartialUpload(t *testing.T) {
 	}
 
 	ru := tex.regionUpdates[0]
-	if ru.x != 5 || ru.y != 5 || ru.w != 10 || ru.h != 10 {
-		t.Errorf("UpdateRegion params = (%d,%d,%d,%d), want (5,5,10,10)",
-			ru.x, ru.y, ru.w, ru.h)
+	wantRegion := image.Rect(5, 5, 15, 15)
+	if ru.region != wantRegion {
+		t.Errorf("UpdateRegion region = %v, want %v", ru.region, wantRegion)
 	}
 
-	// Data should be 10*10*4 = 400 bytes (densely packed RGBA).
-	wantBytes := 10 * 10 * 4
+	// Strided upload passes the full pixmap buffer.
+	wantBytes := 50 * 50 * 4
 	if len(ru.data) != wantBytes {
 		t.Errorf("UpdateRegion data len = %d, want %d", len(ru.data), wantBytes)
+	}
+	if ru.layout.BytesPerRow != 50*4 {
+		t.Errorf("UpdateRegion bytesPerRow = %d, want %d", ru.layout.BytesPerRow, 50*4)
 	}
 
 	// dirtyRect should be reset after flush.
@@ -940,11 +950,9 @@ func TestFlushClampsDirtyRectToPixmap(t *testing.T) {
 	ru := tex.regionUpdates[0]
 	pw := c.ctx.PixelWidth()
 	ph := c.ctx.PixelHeight()
-	wantW := pw - 40
-	wantH := ph - 40
-	if ru.x != 40 || ru.y != 40 || ru.w != wantW || ru.h != wantH {
-		t.Errorf("Clamped region = (%d,%d,%d,%d), want (40,40,%d,%d)",
-			ru.x, ru.y, ru.w, ru.h, wantW, wantH)
+	wantRegion := image.Rect(40, 40, pw, ph)
+	if ru.region != wantRegion {
+		t.Errorf("Clamped region = %v, want %v", ru.region, wantRegion)
 	}
 }
 
@@ -1086,9 +1094,9 @@ func TestFlushPixmapPartialUpload(t *testing.T) {
 		t.Fatalf("UpdateRegion called %d times, want 1", len(tex.regionUpdates))
 	}
 	ru := tex.regionUpdates[0]
-	if ru.x != 5 || ru.y != 5 || ru.w != 10 || ru.h != 10 {
-		t.Errorf("UpdateRegion params = (%d,%d,%d,%d), want (5,5,10,10)",
-			ru.x, ru.y, ru.w, ru.h)
+	wantRegion := image.Rect(5, 5, 15, 15)
+	if ru.region != wantRegion {
+		t.Errorf("UpdateRegion region = %v, want %v", ru.region, wantRegion)
 	}
 }
 
@@ -1639,8 +1647,7 @@ func TestFlush_HiDPI_FullUploadAfterMarkDirty(t *testing.T) {
 			len(tex.regionUpdates))
 		if len(tex.regionUpdates) > 0 {
 			ru := tex.regionUpdates[0]
-			t.Errorf("  partial region = (%d,%d,%d,%d) — this is the Retina quadrant bug (gg#308)",
-				ru.x, ru.y, ru.w, ru.h)
+			t.Errorf("  partial region = %v — this is the Retina quadrant bug (gg#308)", ru.region)
 		}
 	}
 }
@@ -1674,8 +1681,9 @@ func TestMarkDirtyRegion_HiDPI_PartialUpload(t *testing.T) {
 		t.Fatalf("UpdateRegion called %d times, want 1", len(tex.regionUpdates))
 	}
 	ru := tex.regionUpdates[0]
-	if ru.x != 10 || ru.y != 10 || ru.w != 40 || ru.h != 40 {
-		t.Errorf("UpdateRegion = (%d,%d,%d,%d), want (10,10,40,40)", ru.x, ru.y, ru.w, ru.h)
+	wantRegion := image.Rect(10, 10, 50, 50)
+	if ru.region != wantRegion {
+		t.Errorf("UpdateRegion = %v, want %v", ru.region, wantRegion)
 	}
 }
 
