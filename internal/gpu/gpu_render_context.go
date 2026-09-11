@@ -1152,14 +1152,6 @@ func (rc *GPURenderContext) preTessellateFill(cmd *drawCommand) {
 		return
 	}
 
-	// Stroke paths read from stroke brush, fill paths from fill brush.
-	var color [4]float32
-	if cmd.kind == drawCmdStrokePath {
-		color = premulStrokeColorFromPaint(&cmd.paint)
-	} else {
-		color = premulFillColorFromPaint(&cmd.paint)
-	}
-
 	// Convex fast-path (NonZero fill rule only).
 	if cmd.paint.FillRule != gg.FillRuleEvenOdd {
 		if points, ok := extractConvexPolygon(cmd.path); ok {
@@ -1169,7 +1161,24 @@ func (rc *GPURenderContext) preTessellateFill(cmd *drawCommand) {
 		}
 	}
 
-	// Stencil-then-cover.
+	rc.preTessellateStencil(cmd)
+}
+
+// preTessellateStencil tessellates a path for stencil-then-cover and stores the
+// result in cmd.stencilCmd. It is correct for any path under either fill rule.
+func (rc *GPURenderContext) preTessellateStencil(cmd *drawCommand) {
+	if cmd.path == nil || cmd.path.NumVerbs() == 0 {
+		return
+	}
+
+	// Stroke paths read from stroke brush, fill paths from fill brush.
+	var color [4]float32
+	if cmd.kind == drawCmdStrokePath {
+		color = premulStrokeColorFromPaint(&cmd.paint)
+	} else {
+		color = premulFillColorFromPaint(&cmd.paint)
+	}
+
 	tess := NewFanTessellator()
 	tess.TessellatePath(cmd.path)
 	fanVerts := tess.Vertices()
@@ -1190,7 +1199,7 @@ func (rc *GPURenderContext) preTessellateFill(cmd *drawCommand) {
 // preTessellateStroke expands stroke geometry and tessellates the result at draw
 // time. The expanded path replaces cmd.path (so CPU dispatch can use it via
 // SoftwareRenderer.Fill with NonZero, the rule the CPU stroker itself uses).
-// GPU data is stored in convexPoints or stencilCmd just like fills.
+// GPU data is stored in stencilCmd; see below for why never in convexPoints.
 func (rc *GPURenderContext) preTessellateStroke(cmd *drawCommand) {
 	if cmd.path == nil || cmd.path.NumVerbs() == 0 {
 		return
@@ -1227,8 +1236,16 @@ func (rc *GPURenderContext) preTessellateStroke(cmd *drawCommand) {
 	// avoids the even-odd invert stencil that misrenders on some drivers (#374).
 	cmd.paint.FillRule = gg.FillRuleNonZero
 
-	// Tessellate the expanded fill path for GPU.
-	rc.preTessellateFill(cmd)
+	// Stencil-then-cover, never the convex fast path. The convex path draws
+	// the outline as a single triangle fan with no stencil, which is only
+	// correct for a truly convex polygon, and a stroke outline passes the
+	// convexity test without being one: at an inner join the expander pivots
+	// through the centerline point, a small loop that turns the same way as
+	// the outer corners. So the outline of an L — one corner of a step line —
+	// winds twice with every turn of one sign, and its fan covers the hull
+	// between the two arms. The EvenOdd gate on the fast path (#347) used to
+	// keep strokes off it; filled NonZero they need to be kept off here.
+	rc.preTessellateStencil(cmd)
 }
 
 // premulFillColorFromPaint extracts a premultiplied RGBA fill color from a Paint.

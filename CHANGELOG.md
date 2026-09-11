@@ -20,7 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   contour of opposite winding, so rings stay hollow; NonZero also avoids the
   even-odd invert stencil that misrenders on some drivers (#374). New
   regression test compares a self-overlapping stroke through the GPU queue
-  with the CPU stroker pixel by pixel.
+  with the CPU stroker pixel by pixel. Stroke outlines now go to
+  stencil-then-cover directly: the EvenOdd rule was also what kept them off the
+  convex fast path (#347), whose convexity test still accepts the outline of an
+  open stroke with a corner — the inner join's pivot loop turns the same way as
+  the outer corners — and whose unstenciled fan then filled an L-shaped line as
+  a solid wedge.
 
 ## [0.52.5] - 2026-08-26
 
