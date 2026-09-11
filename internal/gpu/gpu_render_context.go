@@ -1189,8 +1189,8 @@ func (rc *GPURenderContext) preTessellateFill(cmd *drawCommand) {
 
 // preTessellateStroke expands stroke geometry and tessellates the result at draw
 // time. The expanded path replaces cmd.path (so CPU dispatch can use it via
-// SoftwareRenderer.Fill with EvenOdd). GPU data is stored in convexPoints or
-// stencilCmd just like fills.
+// SoftwareRenderer.Fill with NonZero, the rule the CPU stroker itself uses).
+// GPU data is stored in convexPoints or stencilCmd just like fills.
 func (rc *GPURenderContext) preTessellateStroke(cmd *drawCommand) {
 	if cmd.path == nil || cmd.path.NumVerbs() == 0 {
 		return
@@ -1218,7 +1218,14 @@ func (rc *GPURenderContext) preTessellateStroke(cmd *drawCommand) {
 	}
 	strokeResultToPath(rc.scratchStrokePath, outVerbs, outCoords)
 	cmd.path = rc.scratchStrokePath.Clone()
-	cmd.paint.FillRule = gg.FillRuleEvenOdd // stroke topology
+	// NonZero, as SoftwareRenderer.Stroke fills the same expander output.
+	// EvenOdd cancels every region the outline covers twice, and an open stroke
+	// covers itself wherever it loops or turns back sharply — a self-crossing
+	// line, a tight zigzag, overlapping joins — so those regions came out as
+	// holes. The expander emits closed outlines as an outer and an inner contour
+	// of opposite winding, so rings stay hollow under NonZero too, and NonZero
+	// avoids the even-odd invert stencil that misrenders on some drivers (#374).
+	cmd.paint.FillRule = gg.FillRuleNonZero
 
 	// Tessellate the expanded fill path for GPU.
 	rc.preTessellateFill(cmd)
